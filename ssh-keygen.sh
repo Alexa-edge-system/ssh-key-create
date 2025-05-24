@@ -1,44 +1,41 @@
 #!/bin/bash
 
-# Exit on error
 set -e
 
-# Variables
 KEY_NAME="$HOME/.ssh/github_id_rsa"
-GITHUB_USER="<your-github-username>"
-GITHUB_EMAIL="<your-email@example.com>"
-GITHUB_TOKEN="<your-personal-access-token>"
 KEY_TITLE="$(hostname)-$(date +%Y-%m-%d)"
 
-# Step 1: Generate SSH key
-echo "Generating SSH key..."
+read -p "Enter your GitHub username: " GITHUB_USER
+read -p "Enter your GitHub email: " GITHUB_EMAIL
+read -s -p "Enter your GitHub personal access token (PAT): " GITHUB_TOKEN
+echo
+
+# 1. Generate SSH key
 ssh-keygen -t rsa -b 4096 -C "$GITHUB_EMAIL" -f "$KEY_NAME" -N ""
 
-# Step 2: Start ssh-agent and add key
-echo "Adding SSH key to ssh-agent..."
+# 2. Add to ssh-agent
 eval "$(ssh-agent -s)"
 ssh-add "$KEY_NAME"
 
-# Step 3: Add public key to GitHub via API
+# 3. Upload to GitHub
 PUB_KEY_CONTENT=$(<"$KEY_NAME.pub")
-
-echo "Adding SSH key to GitHub account..."
-curl -s -o /dev/null -w "%{http_code}" -u "$GITHUB_USER:$GITHUB_TOKEN" \
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -u "$GITHUB_USER:$GITHUB_TOKEN" \
   --data "{\"title\":\"$KEY_TITLE\",\"key\":\"$PUB_KEY_CONTENT\"}" \
-  https://api.github.com/user/keys
+  https://api.github.com/user/keys)
 
-# Step 4: Configure SSH for GitHub
-echo "Setting up SSH config for GitHub..."
-{
-  echo -e "Host github.com"
-  echo -e "  HostName github.com"
-  echo -e "  User git"
-  echo -e "  IdentityFile $KEY_NAME"
-  echo -e "  IdentitiesOnly yes"
-} >> ~/.ssh/config
+if [ "$HTTP_CODE" -ne 201 ]; then
+  echo "❌ Failed to upload SSH key to GitHub. HTTP status: $HTTP_CODE"
+  exit 1
+fi
 
-# Step 5: Test connection
-echo "Testing SSH connection to GitHub..."
+# 4. SSH config
+echo "Host github.com
+  HostName github.com
+  User git
+  IdentityFile $KEY_NAME
+  IdentitiesOnly yes" >> ~/.ssh/config
+
+# 5. Test SSH connection
+echo "✅ SSH key added. Testing GitHub SSH access:"
 ssh -T git@github.com
 
-echo "✅ SSH setup for GitHub completed."
